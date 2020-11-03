@@ -1,0 +1,146 @@
+#
+# Copyright (c) 2020, NVIDIA CORPORATION. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+FROM nvidia/cuda:11.0-devel-ubuntu18.04 
+
+# Install java dependencies 
+RUN apt-get update && apt-get install -y --no-install-recommends openjdk-8-jdk openjdk-8-jre wget
+ENV JAVA_HOME /usr/lib/jvm/java-1.8.0-openjdk-amd64
+ENV PATH $PATH:/usr/lib/jvm/java-1.8.0-openjdk-amd64/jre/bin:/usr/lib/jvm/java-1.8.0-openjdk-amd64/bin
+
+# Before building the docker image, first either download Apache Spark 3.0+ from 
+# http://spark.apache.org/downloads.html or build and make a Spark distribution following
+# the instructions in http://spark.apache.org/docs/3.0.1/building-spark.html (3.0.0 can 
+# be used as well).  
+# If this docker file is being used in the context of building your images from a Spark
+# distribution, the docker build command should be invoked from the top level directory
+# of the Spark distribution. E.g.:
+# docker build -t spark:3.0.1 -f kubernetes/dockerfiles/spark/Dockerfile .
+
+RUN set -ex && \
+    ln -s /lib /lib64 && \
+    mkdir -p /opt/spark && \
+    mkdir -p /opt/spark/logs && \
+    mkdir -p /opt/spark/conf && \
+    mkdir -p /opt/spark/jars && \
+    mkdir -p /opt/tpch && \
+    mkdir -p /opt/spark/examples && \
+    mkdir -p /opt/spark/work-dir && \
+    mkdir -p /opt/sparkRapidsPlugin && \
+    touch /opt/spark/RELEASE && \
+    rm /bin/sh && \
+    ln -sv /bin/bash /bin/sh && \
+    echo "auth required pam_wheel.so use_uid" >> /etc/pam.d/su && \
+    chgrp root /etc/passwd && chmod ug+rw /etc/passwd
+
+COPY spark/jars /opt/spark/jars
+COPY spark/bin /opt/spark/bin
+COPY spark/sbin /opt/spark/sbin
+COPY spark/kubernetes/dockerfiles/spark/entrypoint.sh /opt/
+COPY spark/examples /opt/spark/examples
+COPY spark/kubernetes/tests /opt/spark/tests
+COPY spark/data /opt/spark/data
+
+COPY sparkRapidsPlugin/cudf-0.15-cuda11.jar /opt/sparkRapidsPlugin
+COPY sparkRapidsPlugin/rapids-4-spark_2.12-0.2.0.jar /opt/sparkRapidsPlugin
+COPY sparkRapidsPlugin/getGpusResources.sh /opt/sparkRapidsPlugin
+
+ENV CUDF_JAR_NAME cudf-0.15-cuda11.jar
+ENV RAPIDS_JAR_NAME rapids-4-spark_2.12-0.2.0.jar
+
+RUN mkdir /opt/spark/python
+# TODO: Investigate running both pip and pip3 via virtualenvs
+RUN apt-get update && \
+    apt install -y python python-pip && \
+    apt install -y python3 python3-pip && \
+    # We remove ensurepip since it adds no functionality since pip is
+    # installed on the image and it just takes up 1.6MB on the image
+    rm -r /usr/lib/python*/ensurepip && \
+    pip install --upgrade pip setuptools && \
+    # You may install with python3 packages by using pip3.6
+    # Removed the .cache to save space
+    rm -r /root/.cache && rm -rf /var/cache/apt/*
+
+COPY spark/python/pyspark /opt/spark/python/pyspark
+COPY spark/python/lib /opt/spark/python/lib
+
+RUN mkdir -p /opt/bbsql
+COPY bbsql/bbsql_apps-0.2.2-SNAPSHOT.jar /opt/bbsql 
+COPY bbsql/rapids-4-spark-integration-tests_2.12-0.1-SNAPSHOT.jar /opt/bbsql
+ENV BBSQL /opt/bbsql/bbsql_apps-0.2.2-SNAPSHOT.jar
+ENV JARS /opt/bbsql/rapids-4-spark-integration-tests_2.12-0.1-SNAPSHOT.jar
+
+ENV SPARK_RAPIDS_DIR /opt/sparkRapidsPlugin
+ENV SPARK_CUDF_JAR $SPARK_RAPIDS_DIR/$CUDF_JAR_NAME
+ENV SPARK_RAPIDS_PLUGIN_JAR=$SPARK_RAPIDS_DIR/$RAPIDS_JAR_NAME
+
+ENV SPARK_HOME /opt/spark
+
+WORKDIR /opt/spark/work-dir
+RUN chmod g+w /opt/spark/work-dir
+
+ENTRYPOINT $SPARK_HOME/bin/spark-submit --verbose \
+        --master ${MASTER} \
+        --deploy-mode client \
+        --jars ${JARS} \
+        --num-executors ${NUM_EXECUTORS} \
+        --conf spark.cores.max=${TOTAL_CORES} \
+        --conf spark.sql.warehouse.dir=${WAREHOUSE_PATH} \
+        --driver-memory ${DRIVER_MEMORY}M \
+        --conf spark.task.cpus=1 \
+        --conf spark.sql.files.maxPartitionBytes=${PARTITIONBYTES} \
+        --conf spark.sql.autoBroadcastJoinThreshold=${BROADCASTTHRESHOLD} \
+        --conf spark.sql.shuffle.partitions=${PARTITIONS} \
+        --conf spark.locality.wait=0s \
+        --conf spark.executor.heartbeatInterval=100s \
+        --conf spark.network.timeout=3600s \
+        --conf spark.storage.blockManagerSlaveTimeoutMs=3600s \
+        --conf spark.sql.broadcastTimeout=2000 \
+        --conf spark.executor.extraClassPath=${SPARK_CUDF_JAR}:${SPARK_RAPIDS_PLUGIN_JAR}:/opt/ucx/lib \
+        --conf spark.driver.extraClassPath=${SPARK_CUDF_JAR}:${SPARK_RAPIDS_PLUGIN_JAR}:/opt/ucx/lib \
+        --conf spark.rapids.sql.variableFloatAgg.enabled=true \
+        --conf spark.plugins=com.nvidia.spark.SQLPlugin \
+        --conf spark.rapids.sql.concurrentGpuTasks=${CONCURRENTGPU} \
+        --conf spark.rapids.memory.gpu.pooling.enabled=true \
+        --conf spark.rapids.memory.pinnedPool.size=8g \
+        --conf spark.rapids.sql.incompatibleOps.enabled=true \
+        --conf spark.rapids.sql.explain=ALL \
+        --conf spark.executor.resource.gpu.amount=1 \
+        --conf spark.task.resource.gpu.amount=${RESOURCE_GPU_AMT} \
+        --conf spark.rapids.sql.batchSizeByte=512M \
+        --conf spark.sql.parquet.read.allocation.size=64M \
+        --conf spark.sql.parquet.outputTimestampType=TIMESTAMP_MICROS \
+        --conf spark.eventLog.enabled=true \
+        --conf spark.eventLog.dir=file:${SPARK_HOME}/history \
+        --conf spark.hadoop.fs.s3a.access.key=${S3A_CREDS_USR} \
+        --conf spark.hadoop.fs.s3a.secret.key=${S3A_CREDS_PSW} \
+        --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \
+        --conf spark.hadoop.fs.s3a.endpoint=${S3_ENDPOINT} \
+        --conf spark.hadoop.fs.s3a.path.style.access=true \
+        --conf spark.hadoop.fs.s3a.experimental.input.fadvise=sequential \
+        --conf spark.hadoop.fs.s3a.connection.maximum=1000\
+        --conf spark.hadoop.fs.s3a.threads.core=1000\
+        --conf spark.hadoop.parquet.enable.summary-metadata=false \
+        --conf spark.sql.parquet.mergeSchema=false \
+        --conf spark.sql.parquet.filterPushdown=true \
+        --conf spark.sql.hive.metastorePartitionPruning=true \
+        --conf spark.hadoop.fs.s3a.connection.ssl.enabled=true \
+        --conf spark.executor.extraJavaOptions="-Dai.rapids.cudf.nvtx.enabled=true -Dai.rapids.cudf.prefer-pinned=true -Dai.rapids.spark.semaphore.enabled=true" \
+        --class ai.rapids.spark.examples.tpcxbb.Main \
+        ${BBSQL} --xpu=GPU \
+        --query="$QUERY" \
+        --input="$INPUT_PATH" \
+        --output="${OUTPUT_PATH}/$QUERY"
