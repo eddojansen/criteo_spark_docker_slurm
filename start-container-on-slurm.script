@@ -15,31 +15,25 @@ set -eux
 export MOUNT=/data
 ## Provide mountpoint for criteo data set
 export CRITEO_DATA=/data/days
+## Criteo test settings
+export STARTDAY=0
+export ENDDAY=0
+export FREQUENCY_LIMIT=15
 ## Enable or disable GPU with "true" or "false"
 export ENABLE_GPU="true"
 ## Set threads per GPU
 export CONCURRENTGPU='1'
-
 ## When using S3 for the data set, change the below values accordingly
 export INPUT_PATH="file:///opt/criteo/days"
 export OUTPUT_PATH="file:///opt/results"
 export S3_ENDPOINT=""
 export S3A_CREDS_USR=""
 export S3A_CREDS_PSW=""
-
 ## No need to change these values as they are 
 ## final mapped destinations for within the container 
 ## and/or dynamic values for slurm
 export CRITEO_HOME=/opt/criteo
 export SCRIPT=${CRITEO_HOME}/spark_data_utils.py
-export STARTDAY=0
-export ENDDAY=0
-export FREQUENCY_LIMIT=15
-export INPUT_PATH="file:///opt/criteo/days"
-export OUTPUT_PATH="file:///opt/results"
-export S3_ENDPOINT=""
-export S3A_CREDS_USR=""
-export S3A_CREDS_PSW=""
 export PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin
 export MASTER="spark://`hostname`:7077"
 export GPU_PER_NODE=$(( ${SLURM_GPUS} / ${SLURM_JOB_NUM_NODES} ))
@@ -67,10 +61,12 @@ sudo mkdir -p ${MOUNT}/logs
 sudo chown -R $(id -u):$(id -g) ${MOUNT}/logs
 sudo mkdir -p ${MOUNT}/results/models
 sudo chown -R $(id -u):$(id -g) ${MOUNT}/results
+sudo mkdir -p ${MOUNT}/history
+sudo chown -R $(id -u):$(id -g) ${MOUNT}/history
 
 srun -n 1 -N 1 --gpus=0 -w `hostname`  ${MOUNT}/conf/kill-master.sh || true
 srun --ntasks="${SLURM_JOB_NUM_NODES}" ${MOUNT}/conf/kill-worker.sh || true 
-srun --ntasks="${SLURM_JOB_NUM_NODES}" bash -c "echo -n 'Clearing cache on ' && hostname && sync && sudo /sbin/sysctl vm.drop_caches=3"
+srun --ntasks="${SLURM_JOB_NUM_NODES}" bash -c "echo -n 'Clearing cache on ' && sync && sudo /sbin/sysctl vm.drop_caches=3"
 
 scontrol show hostname $SLURM_JOB_NODELIST > ${MOUNT}/conf/slaves
 
@@ -83,11 +79,6 @@ echo "spark.executor.memory" $((( $SLURM_CPUS_PER_TASK * $SLURM_MEM_PER_CPU / $G
 echo "spark.eventLog.enabled" true >> $conf
 echo "spark.eventLog.dir" file:/opt/spark/history >> $conf
 echo "spark.history.fs.logDirector" file:/opt/spark/history >> $conf
-
-mkdir -p ${MOUNT}/results
-sudo chown -R $(id -u):$(id -g) ${MOUNT}/results
-mkdir -p ${MOUNT}/history
-sudo chown -R $(id -u):$(id -g) ${MOUNT}/history
 
 ## Enable when existing image needs to be deleted
 ##srun -n 1 -N 1 --gpus=0 -w `hostname` docker rmi gcr.io/data-science-enterprise/spark-master-rapids-cuda:3.0.1 || true 
@@ -158,7 +149,6 @@ srun -n 1 -N 1 --gpus=0 docker run -i \
 -v ${MOUNT}/criteo/submit_criteo.sh:/opt/criteo/submit_criteo.sh \
 -v ${MOUNT}/results:/opt/results \
 -v ${CRITEO_DATA}:/opt/criteo/days \
--v /tmp:/tmp \
 --network host \
 --name criteo \
 --rm \
