@@ -114,12 +114,12 @@ Logic:
 - Wait untill all workers have been registered with the master
 - When needed Criteo docker image can be removed from first SLURM node (not enabled by default)
 - Run Spark Criteo docker container on all SLURM nodes with:
-        mapped spark-defaults.conf
-        mapped history
-        mapped results
-        mapped criteo dataset
-	mapped submit_criteo.sh
-        network host
+       -- mapped spark-defaults.conf
+       -- mapped history
+       -- mapped results
+       -- mapped criteo dataset
+       -- mapped submit_criteo.sh
+       -- network host
 - Echo test complete message including results and history location
 - Kill master and Criteo instance on first SLURM node
 - Kill worker instance on all SLURM nodes
