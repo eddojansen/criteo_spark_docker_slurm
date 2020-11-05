@@ -1,6 +1,5 @@
 #!/bin/bash
 master=`sudo docker ps |grep -c master`
-worker=`sudo docker ps |grep -c worker`
 criteo=`sudo docker ps |grep -c criteo`
 online=1
 
@@ -21,10 +20,3 @@ if [ $i -eq $online ]
 fi
 done
 
-for i in $worker
-do
-if [ $i -eq $online ]
-  then sudo docker kill worker && echo "killing old worker instance"
-  else echo "master not running" |  sudo docker rm worker &> /dev/null
-fi
-done

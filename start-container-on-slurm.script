@@ -11,10 +11,25 @@
 
 set -eux
 
+## Provide mountpoint for shared filesystem for config
 export MOUNT=/data
-export CONCURRENTGPU='1'
+## Provide mountpoint for criteo data set
+export CRITEO_DATA=/data/days
+## Enable or disable GPU with "true" or "false"
 export ENABLE_GPU="true"
-##export ENABLE_GPU="" ## this turns the GPU off
+## Set threads per GPU
+export CONCURRENTGPU='1'
+
+## When using S3 for the data set, change the below values accordingly
+export INPUT_PATH="file:///opt/criteo/days"
+export OUTPUT_PATH="file:///opt/results"
+export S3_ENDPOINT=""
+export S3A_CREDS_USR=""
+export S3A_CREDS_PSW=""
+
+## No need to change these values as they are 
+## final mapped destinations for within the container 
+## and/or dynamic values for slurm
 export CRITEO_HOME=/opt/criteo
 export SCRIPT=${CRITEO_HOME}/spark_data_utils.py
 export STARTDAY=0
@@ -42,39 +57,22 @@ sudo mkdir -p ${MOUNT}/conf
 sudo chown -R $(id -u):$(id -g) ${MOUNT}/conf
 sudo cp wait-worker.sh ${MOUNT}/conf/wait-worker.sh
 sudo chmod +x ${MOUNT}/conf/wait-worker.sh
-sudo cp kill-docker.sh ${MOUNT}/conf/kill-docker.sh
-sudo chmod +x ${MOUNT}/conf/kill-docker.sh
+sudo cp kill* ${MOUNT}/conf
+sudo chmod +x ${MOUNT}/conf/kill*.sh
 sudo mkdir -p ${MOUNT}/criteo
 sudo chown -R $(id -u):$(id -g) ${MOUNT}/criteo
-sudo cp run_dict_train_test.sh ${MOUNT}/criteo/run_dict_train_test.sh
-sudo chmod +x ${MOUNT}/criteo/run_dict_train_test.sh
-sudo cp spark_data_utils.py ${MOUNT}/criteo/spark_data_utils.py
-sudo chmod +x ${MOUNT}/criteo/spark_data_utils.py
+sudo cp submit_criteo.sh ${MOUNT}/criteo/submit_criteo.sh
+sudo chmod +x ${MOUNT}/criteo/submit_criteo.sh
 sudo mkdir -p ${MOUNT}/logs
 sudo chown -R $(id -u):$(id -g) ${MOUNT}/logs
 sudo mkdir -p ${MOUNT}/results/models
 sudo chown -R $(id -u):$(id -g) ${MOUNT}/results
 
-LOG_SECOND=`date +%s`
-LOGFILE="/opt/logs/$0.txt.$LOG_SECOND"
-
-srun --ntasks="${SLURM_JOB_NUM_NODES}" ${MOUNT}/conf/kill-docker.sh || true 
+srun -n 1 -N 1 --gpus=0 -w `hostname`  ${MOUNT}/conf/kill-master.sh || true
+srun --ntasks="${SLURM_JOB_NUM_NODES}" ${MOUNT}/conf/kill-worker.sh || true 
 srun --ntasks="${SLURM_JOB_NUM_NODES}" bash -c "echo -n 'Clearing cache on ' && hostname && sync && sudo /sbin/sysctl vm.drop_caches=3"
 
 scontrol show hostname $SLURM_JOB_NODELIST > ${MOUNT}/conf/slaves
-
-env=${MOUNT}/conf/spark-env.sh
-echo "export CONCURRENTGPU=$CONCURRENTGPU" >> $env
-echo "export MASTER=$MASTER" >> $env
-echo "export SPARK_WORKER_CORES=$SPARK_WORKER_CORES" >> $env
-echo "export SPARK_WORKER_MEMORY=$SPARK_WORKER_MEMORY" >> $env
-echo "export GPU_PER_NODE=$GPU_PER_NODE" >> $env
-echo "export TOTAL_CORES=$TOTAL_CORES" >> $env
-echo "export NUM_EXECUTORS=$NUM_EXECUTORS" >> $env
-echo "export NUM_EXECUTOR_CORES=$NUM_EXECUTOR_CORES" >> $env
-echo "export RESOURCE_GPU_AMT=$RESOURCE_GPU_AMT" >> $env
-echo "export WORKER_OPTS='$WORKER_OPTS'" >> $env
-sudo chmod +x ${MOUNT}/conf/spark-env.sh
 
 conf=${MOUNT}/conf/spark-defaults.conf
 echo "spark.default.parallelism" $(( $SLURM_CPUS_PER_TASK * $SLURM_NTASKS )) > $conf
@@ -82,24 +80,31 @@ echo "spark.submit.deployMode" client >> $conf
 echo "spark.master" spark://`hostname`:7077 >> $conf
 echo "spark.executor.cores" $NUM_EXECUTOR_CORES >> $conf
 echo "spark.executor.memory" $((( $SLURM_CPUS_PER_TASK * $SLURM_MEM_PER_CPU / $GPU_PER_NODE )))M >> $conf
+echo "spark.eventLog.enabled" true >> $conf
+echo "spark.eventLog.dir" file:/opt/spark/history >> $conf
+echo "spark.history.fs.logDirector" file:/opt/spark/history >> $conf
 
 mkdir -p ${MOUNT}/results
 sudo chown -R $(id -u):$(id -g) ${MOUNT}/results
 mkdir -p ${MOUNT}/history
 sudo chown -R $(id -u):$(id -g) ${MOUNT}/history
 
+## Enable when existing image needs to be deleted
+##srun -n 1 -N 1 --gpus=0 -w `hostname` docker rmi gcr.io/data-science-enterprise/spark-master-rapids-cuda:3.0.1 || true 
+
 srun -n 1 -N 1 --gpus=0 -w `hostname` docker run -dit \
--v ${MOUNT}/conf/spark-env.sh:/opt/spark/conf/spark-env.sh \
 -v ${MOUNT}/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf \
 -v ${MOUNT}/history:/opt/spark/history \
--v ${MOUNT}/logs:/opt/logs \
--v ${MOUNT}/criteo:/opt/criteo \
 -v ${MOUNT}/results:/opt/results \
+-v ${CRITEO_DATA}:/opt/criteo/days \
 -e MASTER=$MASTER \
 --network host \
 --name master \
 --rm \
 gcr.io/data-science-enterprise/spark-master-rapids-cuda:3.0.1
+
+## Enable when existing image needs to be deleted
+##srun -n $SLURM_JOB_NUM_NODES --ntasks-per-node=1 docker rmi gcr.io/data-science-enterprise/spark-worker-rapids-cuda:3.0.1 || true
 
 srun -n $SLURM_JOB_NUM_NODES --ntasks-per-node=1 docker run -dit \
 -e MASTER=$MASTER \
@@ -108,12 +113,10 @@ srun -n $SLURM_JOB_NUM_NODES --ntasks-per-node=1 docker run -dit \
 -e SPARK_WORKER_MEMORY=$SPARK_WORKER_MEMORY \
 -e SPARK_WORKER_OPTS="$WORKER_OPTS" \
 -e NUM_EXECUTORS="$NUM_EXECUTORS" \
--v ${MOUNT}/conf/spark-env.sh:/opt/spark/conf/spark-env.sh \
 -v ${MOUNT}/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf \
 -v ${MOUNT}/history:/opt/spark/history \
--v ${MOUNT}/logs:/opt/logs \
--v ${MOUNT}/criteo:/opt/criteo \
 -v ${MOUNT}/results:/opt/results \
+-v ${CRITEO_DATA}:/opt/criteo/days \
 --network host \
 --name worker \
 --rm \
@@ -123,14 +126,10 @@ srun -n 1 -N 1 --gpus=0 -w `hostname` bash -c  echo `hostname` && $MOUNT/conf/wa
 
 echo "All workers registered!"
 
+## Enable when existing image needs to be deleted
+##srun -n 1 -N 1 --gpus=0 docker rmi gcr.io/data-science-enterprise/spark-criteo-rapids-cuda:0.2 || true
+
 srun -n 1 -N 1 --gpus=0 docker run -i \
--v ${MOUNT}/conf/spark-env.sh:/opt/spark/conf/spark-env.sh \
--v ${MOUNT}/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf \
--v ${MOUNT}/history:/opt/spark/history \
--v ${MOUNT}/logs:/opt/logs \
--v ${MOUNT}/criteo:/opt/criteo \
--v ${MOUNT}/results:/opt/results \
--v /tmp:/tmp \
 -e MASTER="$MASTER" \
 -e CRITEO_HOME="$CRITEO_HOME" \
 -e SCRIPT="$SCRIPT" \
@@ -154,13 +153,20 @@ srun -n 1 -N 1 --gpus=0 docker run -i \
 -e OUTPUT_PATH="$OUTPUT_PATH" \
 -e INPUT_PATH="$INPUT_PATH" \
 -e PATH="$PATH" \
+-v ${MOUNT}/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf \
+-v ${MOUNT}/history:/opt/spark/history \
+-v ${MOUNT}/criteo/submit_criteo.sh:/opt/criteo/submit_criteo.sh \
+-v ${MOUNT}/results:/opt/results \
+-v ${CRITEO_DATA}:/opt/criteo/days \
+-v /tmp:/tmp \
 --network host \
 --name criteo \
 --rm \
-gcr.io/data-science-enterprise/spark-criteo-rapids-cuda:0.1
+gcr.io/data-science-enterprise/spark-criteo-rapids-cuda:0.2
 
 echo "test complete, check ${MOUNT}/results and ${MOUNT}/history" 
-srun --ntasks="${SLURM_JOB_NUM_NODES}" sh -c ${MOUNT}/conf/kill-docker.sh
+srun -n 1 -N 1 --gpus=0 -w `hostname`  ${MOUNT}/conf/kill-master.sh || true
+srun --ntasks="${SLURM_JOB_NUM_NODES}" ${MOUNT}/conf/kill-worker.sh || true
 echo "Cleanup complete, bye bye.."
 
 ##sleep infinity

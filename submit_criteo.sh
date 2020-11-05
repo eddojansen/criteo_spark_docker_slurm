@@ -46,22 +46,22 @@ CMD_PARAM="--master $MASTER \
         --debug_mode \
     	--days ${STARTDAY}-${ENDDAY} \
     	--model_folder $OUTPUT_PATH/models \
-	--write_mode overwrite --low_mem
+	--write_mode overwrite --low_mem &&
 
 /opt/spark/bin/spark-submit $CMD_PARAM \
 	--conf spark.sql.shuffle.partitions=600 \
-        --conf spark.executor.extraJavaOptions="-Dai.rapids.cudf.prefer-pinned=$ENABLE_GPU\ -Djava.io.tmpdir=/tmp/java-tmp" \
+        --conf spark.executor.extraJavaOptions="-Dai.rapids.cudf.prefer-pinned=$ENABLE_GPU\ -Djava.io.tmpdir=/tmp" \
         $SCRIPT --mode transform \
         --input_folder $INPUT_PATH \
         --debug_mode \
         --days ${STARTDAY}-${ENDDAY} \
         --output_folder $OUTPUT_PATH/train \
         --model_folder $OUTPUT_PATH/models \
-        --write_mode overwrite --low_mem
+        --write_mode overwrite --low_mem &&
 
 /opt/spark/bin/spark-submit $CMD_PARAM \
         --conf spark.sql.shuffle.partitions=30 \
-        --conf spark.executor.extraJavaOptions="-Dai.rapids.cudf.prefer-pinned=$ENABLE_GPU\ -Djava.io.tmpdir=/tmp/java-tmp" \
+        --conf spark.executor.extraJavaOptions="-Dai.rapids.cudf.prefer-pinned=$ENABLE_GPU\ -Djava.io.tmpdir=/tmp/" \
         $SCRIPT --mode transform \
         --input_folder $INPUT_PATH \
         --debug_mode \
@@ -69,4 +69,4 @@ CMD_PARAM="--master $MASTER \
         --output_folder $OUTPUT_PATH/gpu_test \
         --output_ordering input \
         --model_folder $OUTPUT_PATH/models \
-        --write_mode overwrite --low_mem
+        --write_mode overwrite --low_mem 
