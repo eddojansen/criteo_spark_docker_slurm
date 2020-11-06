@@ -42,7 +42,7 @@ across multiple SLURM nodes.
 4) Enable or disable GPU with "true" or "false"
       - export ENABLE_GPU="true"
 5) Set threads per GPU
-      - export CONCURRENTGPU='1'
+      - export CONCURRENTGPU=1
 6) When using S3 for the data set, change the below values accordingly
       - export INPUT_PATH="file:///opt/criteo/days"
       - export OUTPUT_PATH="file:///opt/results"
