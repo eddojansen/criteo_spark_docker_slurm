@@ -12,7 +12,8 @@ across multiple SLURM nodes.
 5) Sudo access rights on SLURM nodes
 
 # Preparation:
-1) Git clone this repository on a node with access to the SLURM environment | https://github.com/eddojansen/criteo_spark_docker_slurm.git
+1) Git clone this repository on a node with access to the SLURM environment
+      - https://github.com/eddojansen/criteo_spark_docker_slurm.git
 2) Build your own Docker images or use the ones already provided, more Docker image details below
 3) Download one or more Criteo datasets, each link below represents a single day of information; day_0 - day_23:
       -	http://azuremlsampleexperiments.blob.core.windows.net/criteo/day_0.gz
