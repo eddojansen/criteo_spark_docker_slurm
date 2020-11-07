@@ -2,21 +2,20 @@ set -eux
 
 CMD_PARAM="--master $MASTER \
     --jars $JARS \
-    --driver-memory ${DRIVER_MEMORY}G \
+    --driver-memory ${DRIVER_MEMORY} \
     --executor-cores $NUM_EXECUTOR_CORES \
     --executor-memory ${EXECUTOR_MEMORY} \
+    --conf spark.executor.resource.gpu.amount=${RESOURCE_GPU_AMOUNT} \
     --conf spark.cores.max=$TOTAL_CORES \
     --conf spark.files.maxPartitionBytes=1342177280 \
     --conf spark.task.cpus=${NUM_EXECUTOR_CORES} \
-    --conf spark.task.resource.gpu.amount=$RESOURCE_GPU_AMT \
-    --conf spark.executor.resource.gpu.amount=1 \
-    --conf spark.sql.extensions=com.nvidia.spark.rapids.SQLExecPlugin \
-    --conf spark.plugins=com.nvidia.spark.SQLPlugin \
-    --conf spark.rapids.sql.concurrentGpuTasks=2 \
+    --conf spark.task.resource.gpu.amount=${RESOURCE_GPU_AMT} \
+    --conf spark.sql.extensions=${SQL_EXTENSIONS} \
+    --conf spark.plugins=${SPARK_PLUGINS} \
     --conf spark.rapids.sql.reader.batchSizeRows=4000000 \
     --conf spark.rapids.memory.pinnedPool.size=16g \
     --conf spark.sql.autoBroadcastJoinThreshold=1GB \
-    --conf spark.rapids.sql.incompatibleOps.enabled=true \
+    --conf spark.rapids.sql.incompatibleOps.enabled=${INCOMPATIBLE_OPS} \
     --conf spark.sql.files.maxPartitionBytes=1G \
     --conf spark.driver.maxResultSize=2G \
     --conf spark.locality.wait=0s \
@@ -39,7 +38,7 @@ CMD_PARAM="--master $MASTER \
     
 /opt/spark/bin/spark-submit $CMD_PARAM \
     	--conf spark.sql.shuffle.partitions=600 \
-    	--conf spark.executor.extraJavaOptions="-Dai.rapids.cudf.prefer-pinned=${ENABLE_GPU}\ -Djava.io.tmpdir=/tmp" \
+    	--conf spark.executor.extraJavaOptions="${EXTRA_JAVA_OPTIONS}" \
     	$SCRIPT --mode generate_models \
     	--input_folder $INPUT_PATH \
     	--frequency_limit $FREQUENCY_LIMIT \
@@ -50,8 +49,8 @@ CMD_PARAM="--master $MASTER \
 
 /opt/spark/bin/spark-submit $CMD_PARAM \
 	--conf spark.sql.shuffle.partitions=600 \
-        --conf spark.executor.extraJavaOptions="-Dai.rapids.cudf.prefer-pinned=$ENABLE_GPU\ -Djava.io.tmpdir=/tmp" \
-        $SCRIPT --mode transform \
+        --conf spark.executor.extraJavaOptions="${EXTRA_JAVA_OPTIONS}" \
+	$SCRIPT --mode transform \
         --input_folder $INPUT_PATH \
         --debug_mode \
         --days ${STARTDAY}-${ENDDAY} \
@@ -61,8 +60,8 @@ CMD_PARAM="--master $MASTER \
 
 /opt/spark/bin/spark-submit $CMD_PARAM \
         --conf spark.sql.shuffle.partitions=30 \
-        --conf spark.executor.extraJavaOptions="-Dai.rapids.cudf.prefer-pinned=$ENABLE_GPU\ -Djava.io.tmpdir=/tmp/" \
-        $SCRIPT --mode transform \
+        --conf spark.executor.extraJavaOptions="${EXTRA_JAVA_OPTIONS}" \
+	$SCRIPT --mode transform \
         --input_folder $INPUT_PATH \
         --debug_mode \
         --days ${STARTDAY}-${ENDDAY} \
