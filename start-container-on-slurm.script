@@ -5,7 +5,7 @@
 #SBATCH --ntasks=4
 #SBATCH --cpus-per-task=16
 #SBATCH --mem-per-cpu=3072
-#SBATCH --time=60:00
+#SBATCH --time=600:00
 #SBATCH --output=outfile-%J
 #SBATCH --gpus=8
 
@@ -14,30 +14,44 @@ set -eux
 ## Provide mountpoint for shared filesystem for config
 export MOUNT=/data
 
-## Provide mountpoint for criteo data set
-export CRITEO_DATA=/data/days
-
 ## Criteo test settings
 export STARTDAY=0
-export ENDDAY=2
+export ENDDAY=23
 export FREQUENCY_LIMIT=15
 
 ## Enable or disable GPU with "true" or "false"
 export ENABLE_GPU="true"
 
 ## Set threads per GPU
-export CONCURRENTGPU=2
+export CONCURRENTGPU=1
+
+## Set shuffle.partitions, depends on the dataset size: 1T=1048576M / 200 = 5242
+export SHUFFLE_PARTITIONS=4000
 
 ## Set Spark SQL partition size
-export MAXPARTITIONBYTES="1G"
+export MAXPARTITIONBYTES=128
+
+## Configure driver memory
+export DRIVER_MEMORY=20480
+
+## When using file provide the mountpoint for the criteo dataset and adjust the INPUTH_PATH for file access
+## when not used leave empty
+##export CRITEO_DATA=/data/days
+export CRITEO_DATA=""
+## Adjust the INPUTH_PATH for file access
+##export INPUT_PATH="file:///opt/criteo/days"
 
 ## When using S3 for the data set, change the below values accordingly
-export INPUT_PATH="file:///opt/criteo/days"
+export INPUT_PATH="gs://ec-benchmark-data/criteo"
 export OUTPUT_PATH="file:///opt/results"
-export WAREHOUSE_PATH="file:///opt/criteo/warehouse"
-export S3_ENDPOINT=""
+export S3_ENDPOINT="https://storage.googleapis.com"
 export S3A_CREDS_USR=""
 export S3A_CREDS_PSW=""
+
+
+##export WAREHOUSE_PATH="file:///opt/criteo/warehouse"
+#export WAREHOUSE_PATH="gs://ec-benchmark-data/criteo"
+export WAREHOUSE_PATH="file:///opt/criteo"
 
 ## No need to change these values as they are
 ## final mapped destinations for within the container
@@ -46,7 +60,7 @@ export CRITEO_HOME=/opt/criteo
 export SCRIPT=${CRITEO_HOME}/spark_data_utils.py
 export TOTAL_CORES=$(( ${SLURM_CPUS_PER_TASK} * ${SLURM_NTASKS} ))
 
-if [ $ENABLE_GPU = "false" ]
+if [ ${ENABLE_GPU} = "false" ]
   then export GPU_PER_NODE=0
        export NUM_EXECUTORS=${SLURM_JOB_NUM_NODES}
        export RESOURCE_GPU_AMT=0
@@ -55,17 +69,16 @@ if [ $ENABLE_GPU = "false" ]
        export NUM_EXECUTOR_CORES=$(( ${TOTAL_CORES} / ${NUM_EXECUTORS} ))
 
   else export GPU_PER_NODE=$(( ${SLURM_GPUS} / ${SLURM_JOB_NUM_NODES} ))
-       export NUM_EXECUTORS=$SLURM_GPUS
+       export NUM_EXECUTORS=${SLURM_GPUS}
        export NUM_EXECUTOR_CORES=$(( ${TOTAL_CORES} / ${NUM_EXECUTORS} ))
        export WORKER_OPTS="-Dspark.worker.resource.gpu.amount=${GPU_PER_NODE} -Dspark.worker.resource.gpu.discoveryScript=/opt/sparkRapidsPlugin/getGpusResources.sh"
 fi
 
-export PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin
+export PATH=${PATH}:${SPARK_HOME}/bin:${SPARK_HOME}/sbin
 export MASTER="spark://`hostname`:7077"
-export EXECUTOR_MEMORY=$((( ${TOTAL_CORES} * ${SLURM_MEM_PER_CPU} / ${NUM_EXECUTORS} )))M
-export DRIVER_MEMORY="10240M"
+export EXECUTOR_MEMORY=$(( ${TOTAL_CORES} * ${SLURM_MEM_PER_CPU} / ${NUM_EXECUTORS} ))
 export SPARK_WORKER_CORES=`nproc`
-export SPARK_WORKER_MEMORY=$(( $SPARK_WORKER_CORES * $SLURM_MEM_PER_CPU ))M
+export SPARK_WORKER_MEMORY=$(( ${SPARK_WORKER_CORES} * ${SLURM_MEM_PER_CPU} ))
 
 sudo mkdir -p ${MOUNT}/conf
 sudo chown -R $(id -u):$(id -g) ${MOUNT}/conf
@@ -92,11 +105,11 @@ srun --ntasks="${SLURM_JOB_NUM_NODES}" bash -c "echo -n 'Clearing cache on ' && 
 scontrol show hostname $SLURM_JOB_NODELIST > ${MOUNT}/conf/slaves
 
 conf=${MOUNT}/conf/spark-defaults.conf
-echo "spark.default.parallelism" $(( $SLURM_CPUS_PER_TASK * $SLURM_NTASKS )) > $conf
+echo "spark.default.parallelism" $(( ${SLURM_CPUS_PER_TASK} * ${SLURM_NTASKS} )) > $conf
 echo "spark.submit.deployMode" client >> $conf
 echo "spark.master" spark://`hostname`:7077 >> $conf
-echo "spark.executor.cores" $NUM_EXECUTOR_CORES >> $conf
-echo "spark.executor.memory" $EXECUTOR_MEMORY >> $conf
+echo "spark.executor.cores" ${NUM_EXECUTOR_CORES} >> $conf
+echo "spark.executor.memory" ${EXECUTOR_MEMORY}M >> $conf
 echo "spark.eventLog.enabled" true >> $conf
 echo "spark.eventLog.dir" file:/opt/spark/history >> $conf
 echo "spark.history.fs.logDirector" file:/opt/spark/history >> $conf
@@ -104,12 +117,12 @@ echo "spark.history.fs.logDirector" file:/opt/spark/history >> $conf
 ## Enable when existing image needs to be deleted
 ##srun -n 1 -N 1 --gpus=0 -w `hostname` docker rmi gcr.io/data-science-enterprise/spark-master-rapids-cuda:3.0.1 || true 
 
-srun -n 1 -N 1 --gpus=0 -w `hostname` docker run -dit \
+srun -n 1 -N 1 --gpus=0 docker run -dit \
 -v ${MOUNT}/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf \
 -v ${MOUNT}/history:/opt/spark/history \
 -v ${MOUNT}/results:/opt/results \
 -v ${CRITEO_DATA}:/opt/criteo/days \
--e MASTER=$MASTER \
+-e MASTER=${MASTER} \
 -v /tmp:/tmp \
 --network host \
 --name master \
@@ -119,16 +132,19 @@ gcr.io/data-science-enterprise/spark-master-rapids-cuda:3.0.1
 ## Enable when existing image needs to be deleted
 ##srun -n $SLURM_JOB_NUM_NODES --ntasks-per-node=1 docker rmi gcr.io/data-science-enterprise/spark-worker-rapids-cuda:3.0.1 || true 
 
-srun -n $SLURM_JOB_NUM_NODES --ntasks-per-node=1 docker run -dit \
--e MASTER=$MASTER \
+#srun --ntasks=$(( ${SLURM_JOB_NUM_NODES} -1 )) --ntasks-per-node=1 --exclude=`hostname` docker run -dit \
+
+srun --ntasks=${SLURM_JOB_NUM_NODES} --ntasks-per-node=1 docker run -dit \
+-e MASTER=${MASTER} \
 -e SPARK_WORKER_CORES=`nproc` \
--e SPARK_WORKER_MEMORY=$SPARK_WORKER_MEMORY \
--e SPARK_WORKER_OPTS="$WORKER_OPTS" \
+-e SPARK_WORKER_MEMORY="${SPARK_WORKER_MEMORY}M" \
+-e SPARK_WORKER_OPTS="${WORKER_OPTS}" \
 -v ${MOUNT}/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf \
 -v ${MOUNT}/history:/opt/spark/history \
 -v ${MOUNT}/results:/opt/results \
 -v ${MOUNT}/criteo/warehouse:/opt/criteo/warehouse \
 -v ${CRITEO_DATA}:/opt/criteo/days \
+-v ${MOUNT}/data/work:/opt/spark/work \
 -v /tmp:/tmp \
 --network host \
 --name worker \
@@ -143,28 +159,28 @@ echo "All workers registered!"
 ##srun -n 1 -N 1 --gpus=0 docker rmi gcr.io/data-science-enterprise/spark-criteo-rapids-cuda:0.2 || true
 
 srun -n 1 -N 1 --gpus=0 docker run -i \
--e MASTER="$MASTER" \
--e CRITEO_HOME="$CRITEO_HOME" \
--e SCRIPT="$SCRIPT" \
--e FREQUENCY_LIMIT="$FREQUENCY_LIMIT" \
--e STARTDAY="$STARTDAY" \
--e ENDDAY="$ENDDAY" \
--e ENABLE_GPU=$ENABLE_GPU \
+-e MASTER="${MASTER}" \
+-e CRITEO_HOME="${CRITEO_HOME}" \
+-e SCRIPT="${SCRIPT}" \
+-e FREQUENCY_LIMIT="${FREQUENCY_LIMIT}" \
+-e STARTDAY="${STARTDAY}" \
+-e ENDDAY="${ENDDAY}" \
+-e ENABLE_GPU="${ENABLE_GPU}" \
 -e SPARK_WORKER_CORES=`nproc` \
--e SPARK_WORKER_MEMORY=$SPARK_WORKER_MEMORY \
--e SPARK_WORKER_OPTS="$WORKER_OPTS" \
--e CONCURRENTGPU="$CONCURRENTGPU" \
--e TOTAL_CORES="$TOTAL_CORES" \
--e NUM_EXECUTORS="$NUM_EXECUTORS" \
--e NUM_EXECUTOR_CORES="$NUM_EXECUTOR_CORES" \
--e EXECUTOR_MEMORY="$EXECUTOR_MEMORY" \
--e DRIVER_MEMORY="$DRIVER_MEMORY" \
--e MAXPARTITIONBYTES="$MAXPARTITIONBYTES" \
--e S3A_CREDS_USR="$S3A_CREDS_USR" \
--e S3A_CREDS_PSW="$S3A_CREDS_PSW" \
--e S3_ENDPOINT="$S3_ENDPOINT" \
--e OUTPUT_PATH="$OUTPUT_PATH" \
--e INPUT_PATH="$INPUT_PATH" \
+-e SPARK_WORKER_OPTS="${WORKER_OPTS}" \
+-e CONCURRENTGPU="${CONCURRENTGPU}" \
+-e TOTAL_CORES="${TOTAL_CORES}" \
+-e NUM_EXECUTORS="${NUM_EXECUTORS}" \
+-e NUM_EXECUTOR_CORES="${NUM_EXECUTOR_CORES}" \
+-e EXECUTOR_MEMORY="${EXECUTOR_MEMORY}M" \
+-e DRIVER_MEMORY="${DRIVER_MEMORY}M" \
+-e SHUFFLE_PARTITIONS="${SHUFFLE_PARTITIONS}" \
+-e MAXPARTITIONBYTES="${MAXPARTITIONBYTES}M" \
+-e S3A_CREDS_USR="${S3A_CREDS_USR}" \
+-e S3A_CREDS_PSW="${S3A_CREDS_PSW}" \
+-e S3_ENDPOINT="${S3_ENDPOINT}" \
+-e OUTPUT_PATH="${OUTPUT_PATH}" \
+-e INPUT_PATH="${INPUT_PATH}" \
 -e PATH="$PATH" \
 -v ${MOUNT}/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf \
 -v ${MOUNT}/history:/opt/spark/history \
@@ -172,6 +188,7 @@ srun -n 1 -N 1 --gpus=0 docker run -i \
 -v ${MOUNT}/results:/opt/results \
 -v ${CRITEO_DATA}:/opt/criteo/days \
 -v ${MOUNT}/criteo/warehouse:/opt/criteo/warehouse \
+-v ${MOUNT}/data/work:/opt/spark/work \
 -v /tmp:/tmp \
 --network host \
 --name criteo \

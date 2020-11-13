@@ -11,7 +11,7 @@ if [ $ENABLE_GPU = "false" ]
     --driver-memory ${DRIVER_MEMORY} \
     --executor-cores ${NUM_EXECUTOR_CORES} \
     --executor-memory ${EXECUTOR_MEMORY} \
-    --conf spark.sql.shuffle.partitions=$(( ${NUM_EXECUTORS} * 2 )) \
+    --conf spark.sql.shuffle.partitions=${SHUFFLE_PARTITIONS} \
     --conf spark.task.cpus=2 \
     --conf spark.cores.max=${TOTAL_CORES} \
     --conf spark.sql.autoBroadcastJoinThreshold=1G \
@@ -43,7 +43,7 @@ if [ $ENABLE_GPU = "false" ]
     --driver-memory ${DRIVER_MEMORY} \
     --executor-cores ${NUM_EXECUTOR_CORES} \
     --executor-memory ${EXECUTOR_MEMORY} \
-    --conf spark.sql.shuffle.partitions=$(( ${NUM_EXECUTORS} * ${CONCURRENTGPU} )) \
+    --conf spark.sql.shuffle.partitions=${SHUFFLE_PARTITIONS} \
     --conf spark.task.cpus=1 \
     --conf spark.executor.resource.gpu.amount=1 \
     --conf spark.executor.extraJavaOptions="-Dai.rapids.cudf.prefer-pinned=true" \
@@ -57,8 +57,7 @@ if [ $ENABLE_GPU = "false" ]
     --conf spark.rapids.sql.reader.batchSizeRows=4000000 \
     --conf spark.rapids.memory.pinnedPool.size=4G \
     --conf spark.sql.autoBroadcastJoinThreshold=1GB \
-    --conf spark.driver.maxResultSize=2G \
-    --conf spark.sql.files.maxPartitionBytes=1G \
+    --conf spark.driver.maxResultSize=1G \
     --conf spark.executor.heartbeatInterval=300s \
     --conf spark.storage.blockManagerSlaveTimeoutMs=3600s \
     --conf spark.sql.files.maxPartitionBytes=${MAXPARTITIONBYTES} \
