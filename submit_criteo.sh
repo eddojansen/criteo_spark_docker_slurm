@@ -6,7 +6,7 @@ RESOURCE_GPU_AMT=$(echo "scale=3; ${NUM_EXECUTORS} / ${TOTAL_CORES}" | bc)
 TRANSENDDAY=$((${ENDDAY}-1))
 
 if [ $ENABLE_GPU = "false" ]
-  then CMD_PARAM="--master ${MASTER} \
+  then CMD_PARAM="--master spark://$MASTER:7077 \
     --jars ${JARS} \
     --driver-memory ${DRIVER_MEMORY} \
     --executor-cores ${NUM_EXECUTOR_CORES} \
@@ -38,12 +38,12 @@ if [ $ENABLE_GPU = "false" ]
     TEST="cpu_test" && 
   echo "Running CPU mode"
 
-  else CMD_PARAM="--master ${MASTER} \
+  else CMD_PARAM="--master spark://$MASTER:7077 \
     --jars ${JARS} \
     --driver-memory ${DRIVER_MEMORY} \
     --executor-cores ${NUM_EXECUTOR_CORES} \
     --executor-memory ${EXECUTOR_MEMORY} \
-    --conf spark.sql.shuffle.partitions=${SHUFFLE_PARTITIONS} \
+    --conf spark.sql.shuffle.partitions=6400 \
     --conf spark.task.cpus=1 \
     --conf spark.executor.resource.gpu.amount=1 \
     --conf spark.executor.extraJavaOptions="-Dai.rapids.cudf.prefer-pinned=true" \
@@ -53,14 +53,10 @@ if [ $ENABLE_GPU = "false" ]
     --conf spark.plugins=com.nvidia.spark.SQLPlugin \
     --conf spark.rapids.sql.incompatibleOps.enabled=true \
     --conf spark.rapids.sql.concurrentGpuTasks=${CONCURRENTGPU} \
-    --conf spark.rapids.sql.batchSizeRows=4000000 \
-    --conf spark.rapids.sql.reader.batchSizeRows=4000000 \
-    --conf spark.rapids.memory.pinnedPool.size=4G \
-    --conf spark.sql.autoBroadcastJoinThreshold=1GB \
-    --conf spark.driver.maxResultSize=1G \
+    --conf spark.rapids.memory.pinnedPool.size=8G \
     --conf spark.executor.heartbeatInterval=300s \
     --conf spark.storage.blockManagerSlaveTimeoutMs=3600s \
-    --conf spark.sql.files.maxPartitionBytes=${MAXPARTITIONBYTES} \
+    --conf spark.sql.files.maxPartitionBytes=128M \
     --conf spark.locality.wait=0s \
     --conf spark.network.timeout=1800s \
     --conf spark.executor.extraClassPath=${XGBOOST_JAR}:${XGBOOST_SPARK_JAR}:${SPARK_RAPIDS_PLUGIN_JAR}:${SPARK_CUDF_JAR} \
@@ -71,12 +67,11 @@ if [ $ENABLE_GPU = "false" ]
     --conf spark.hadoop.fs.s3a.endpoint=${S3_ENDPOINT} \
     --conf spark.hadoop.fs.s3a.path.style.access=true \
     --conf spark.hadoop.fs.s3a.experimental.input.fadvise=sequential \
-    --conf spark.hadoop.fs.s3a.connection.maximum=1000\
-    --conf spark.hadoop.fs.s3a.threads.core=1000\
+    --conf spark.hadoop.fs.s3a.connection.maximum=1000 \
+    --conf spark.hadoop.fs.s3a.threads.core=1000 \
     --conf spark.hadoop.parquet.enable.summary-metadata=false \
     --conf spark.sql.parquet.mergeSchema=false \
     --conf spark.sql.parquet.filterPushdown=true \
-    --conf spark.sql.hive.metastorePartitionPruning=true \
     --conf spark.hadoop.fs.s3a.connection.ssl.enabled=true" && 
   TEST="gpu_test" &&
   echo "Running GPU mode"

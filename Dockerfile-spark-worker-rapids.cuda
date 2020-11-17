@@ -72,4 +72,4 @@ ENV SPARK_HOME /opt/spark
 WORKDIR /opt/spark/work-dir
 RUN chmod g+w /opt/spark/work-dir
 
-ENTRYPOINT $SPARK_HOME/bin/spark-class org.apache.spark.deploy.worker.Worker $MASTER
+ENTRYPOINT $SPARK_HOME/bin/spark-class org.apache.spark.deploy.worker.Worker spark://$MASTER:7077
