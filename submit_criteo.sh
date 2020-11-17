@@ -48,6 +48,9 @@ if [ $ENABLE_GPU = "false" ]
     --conf spark.executor.resource.gpu.amount=1 \
     --conf spark.executor.extraJavaOptions="-Dai.rapids.cudf.prefer-pinned=true" \
     --conf spark.cores.max=${TOTAL_CORES} \
+    --conf spark.sql.autoBroadcastJoinThreshold=1G \
+    --conf spark.driver.maxResultSize=2G \
+    --conf spark.sql.files.maxPartitionBytes=1G \
     --conf spark.task.resource.gpu.amount=${RESOURCE_GPU_AMT} \
     --conf spark.sql.extensions=com.nvidia.spark.rapids.SQLExecPlugin \
     --conf spark.plugins=com.nvidia.spark.SQLPlugin \

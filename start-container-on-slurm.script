@@ -1,16 +1,28 @@
 #!/bin/bash
-
-#SBATCH --nodes=4
 #SBATCH --partition=batch
+##SBATCH --time=600:00
+#SBATCH --nodes=1
 #SBATCH --cpus-per-task=16
-#SBATCH --mem-per-cpu=3168
-#SBATCH --time=600:00
-#SBATCH --output=outfile-%J
+#SBATCH --mem-per-cpu=3072
 #SBATCH --ntasks-per-node=1
-##SBATCH --gpus-per-node=2
-#SBATCH --gpus=8
+#SBATCH hetjob
+#SBATCH --nodes=3
+#SBATCH --cpus-per-task=16
+#SBATCH --gpus-per-node=2
+#SBATCH --mem-per-cpu=3072
+#SBATCH --ntasks-per-node=1
 
 set -eux
+
+echo  SLURM_JOB_NUM_NODES $SLURM_JOB_NUM_NODES
+
+srun --het-group=0 hostname
+
+srun --het-group=1 hostname
+
+echo SLURM_JOB_NUM_NODES_HET_GROUP_0 $SLURM_JOB_NUM_NODES_HET_GROUP_0
+echo SLURM_JOB_NUM_NODES_HET_GROUP_1 $SLURM_JOB_NUM_NODES_HET_GROUP_1
+echo SLURM_GPUS_PER_NODE_HET_GROUP_1 $SLURM_GPUS_PER_NODE_HET_GROUP_1
 
 ## Provide mountpoint for shared filesystem for config
 export MOUNT=/data
@@ -58,20 +70,20 @@ export WAREHOUSE_PATH="file:///opt/criteo"
 ## and/or dynamic values for slurm
 export CRITEO_HOME=/opt/criteo
 export SCRIPT=${CRITEO_HOME}/spark_data_utils.py
-export TOTAL_CORES=$(( ${SLURM_CPUS_PER_TASK} * ${SLURM_JOB_NUM_NODES} ))
+export TOTAL_CORES=$(( ${SLURM_CPUS_PER_TASK_HET_GROUP_1} * ${SLURM_JOB_NUM_NODES_HET_GROUP_1} ))
 
 if [ ${ENABLE_GPU} = "false" ]
   then 
        export GPU_PER_NODE=0
-       export NUM_EXECUTORS=${SLURM_JOB_NUM_NODES}
+       export NUM_EXECUTORS=${SLURM_JOB_NUM_NODES_HET_GROUP_1}
        export RESOURCE_GPU_AMT=0
        export WORKER_OPTS=""
        export CONCURRENTGPU=1
        export NUM_EXECUTOR_CORES=$(( ${TOTAL_CORES} / ${NUM_EXECUTORS} ))
 
   else 
-       export GPU_PER_NODE=$(( ${SLURM_GPUS} / ${SLURM_JOB_NUM_NODES} ))
-       export NUM_EXECUTORS=${SLURM_GPUS}
+       export GPU_PER_NODE=${SLURM_GPUS_PER_NODE_HET_GROUP_1}
+       export NUM_EXECUTORS=$(( ${SLURM_GPUS_PER_NODE_HET_GROUP_1} * ${SLURM_JOB_NUM_NODES_HET_GROUP_1} ))
        export NUM_EXECUTOR_CORES=$(( ${TOTAL_CORES} / ${NUM_EXECUTORS} ))
        export WORKER_OPTS="-Dspark.worker.resource.gpu.amount=${GPU_PER_NODE} -Dspark.worker.resource.gpu.discoveryScript=/opt/sparkRapidsPlugin/getGpusResources.sh"
 fi
@@ -79,9 +91,9 @@ fi
 export PATH=${PATH}:${SPARK_HOME}/bin:${SPARK_HOME}/sbin
 #export MASTER="spark://`hostname`:7077"
 export MASTER=`hostname`
-export EXECUTOR_MEMORY=$(( ${TOTAL_CORES} * ${SLURM_MEM_PER_CPU} / ${NUM_EXECUTORS} - $DRIVER_MEMORY ))
+export EXECUTOR_MEMORY=$(( ${TOTAL_CORES} * ${SLURM_MEM_PER_CPU_HET_GROUP_1} / ${NUM_EXECUTORS} ))
 export SPARK_WORKER_CORES=`nproc`
-export SPARK_WORKER_MEMORY=$(( ${TOTAL_CORES} * ${SLURM_MEM_PER_CPU} / ${SLURM_JOB_NUM_NODES} - $DRIVER_MEMORY ))
+export SPARK_WORKER_MEMORY=$(( ${TOTAL_CORES} * ${SLURM_MEM_PER_CPU_HET_GROUP_1} / ${SLURM_JOB_NUM_NODES_HET_GROUP_1} ))
 
 sudo mkdir -p ${MOUNT}/conf
 sudo chown -R $(id -u):$(id -g) ${MOUNT}/conf
@@ -101,11 +113,11 @@ sudo chown -R $(id -u):$(id -g) ${MOUNT}/results
 sudo mkdir -p ${MOUNT}/history
 sudo chown -R $(id -u):$(id -g) ${MOUNT}/history
 
-srun -n 1 -N 1 --gpus=0 -w `hostname`  ${MOUNT}/conf/kill-master.sh || true &&
-srun --ntasks="${SLURM_JOB_NUM_NODES}" ${MOUNT}/conf/kill-worker.sh || true &&
-srun --ntasks="${SLURM_JOB_NUM_NODES}" bash -c "echo -n 'Clearing cache on ' && sync && sudo /sbin/sysctl vm.drop_caches=3"
+srun --het-group=0 -n 1 -N 1 --gpus=0 -w `hostname`  ${MOUNT}/conf/kill-master.sh || true &&
+srun --het-group=1 --ntasks="${SLURM_JOB_NUM_NODES_HET_GROUP_1}" ${MOUNT}/conf/kill-worker.sh || true &&
+srun --het-group=0,1 --ntasks="${SLURM_JOB_NUM_NODES}" bash -c "echo -n 'Clearing cache on ' && sync && sudo /sbin/sysctl vm.drop_caches=3"
 
-scontrol show hostname $SLURM_JOB_NODELIST > ${MOUNT}/conf/slaves
+scontrol show hostname $SLURM_JOB_NODELIST_HET_GROUP_1 > ${MOUNT}/conf/slaves
 
 conf=${MOUNT}/conf/spark-defaults.conf
 echo "spark.default.parallelism" $(( ${TOTAL_CORES} * 2 )) > $conf
@@ -118,9 +130,9 @@ echo "spark.eventLog.dir" file:/opt/spark/history >> $conf
 echo "spark.history.fs.logDirector" file:/opt/spark/history >> $conf
 
 ## Enable when existing image needs to be deleted
-##srun -n 1 -N 1 --gpus=0 -w `hostname` docker rmi gcr.io/data-science-enterprise/spark-master-rapids-cuda:3.0.1 || true 
+##srun --het-group=1 -n 1 -N 1 -w `hostname` docker rmi gcr.io/data-science-enterprise/spark-slurm-rapids-cuda:3.0.1 || true 
 
-srun -n 1 -N 1 --gpus=0 -w `hostname` docker run -dit \
+srun --het-group=0 -n 1 -N 1 -w `hostname` docker run -dit \
 -v ${MOUNT}/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf \
 -v ${MOUNT}/history:/opt/spark/history \
 -v ${MOUNT}/results:/opt/results \
@@ -133,9 +145,9 @@ srun -n 1 -N 1 --gpus=0 -w `hostname` docker run -dit \
 gcr.io/data-science-enterprise/spark-master-rapids-cuda:3.0.1
 
 ## Enable when existing image needs to be deleted
-srun --ntasks=${SLURM_JOB_NUM_NODES} --ntasks-per-node=1 docker rmi gcr.io/data-science-enterprise/spark-worker-rapids-cuda:3.0.1 || true
+##srun --het-group=0 --ntasks=${SLURM_JOB_NUM_NODES_HET_GROUP_0} --ntasks-per-node=1 docker rmi gcr.io/data-science-enterprise/spark-slurm-rapids-cuda:3.0.1 || true
 
-srun --ntasks=${SLURM_JOB_NUM_NODES} --ntasks-per-node=1 docker run -dit \
+srun --het-group=1 --ntasks=${SLURM_JOB_NUM_NODES_HET_GROUP_1} --ntasks-per-node=1 docker run -dit \
 -e MASTER=${MASTER} \
 -e SPARK_WORKER_CORES=`nproc` \
 -e SPARK_WORKER_MEMORY="${SPARK_WORKER_MEMORY}M" \
@@ -143,7 +155,6 @@ srun --ntasks=${SLURM_JOB_NUM_NODES} --ntasks-per-node=1 docker run -dit \
 -v ${MOUNT}/conf/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf \
 -v ${MOUNT}/history:/opt/spark/history \
 -v ${MOUNT}/results:/opt/results \
--v ${MOUNT}/criteo/warehouse:/opt/criteo/warehouse \
 -v ${CRITEO_DATA}:/opt/criteo/days \
 -v ${MOUNT}/data/work:/opt/spark/work \
 -v /tmp:/tmp \
@@ -152,14 +163,14 @@ srun --ntasks=${SLURM_JOB_NUM_NODES} --ntasks-per-node=1 docker run -dit \
 --rm \
 gcr.io/data-science-enterprise/spark-worker-rapids-cuda:3.0.1
 
-srun -n 1 -N 1 --gpus=0 -w `hostname` bash -c  echo `hostname` && $MOUNT/conf/wait-worker.sh
+srun --het-group=0 -n 1 -N 1 -w `hostname` bash -c  echo `hostname` && $MOUNT/conf/wait-worker.sh
 
 echo "All workers registered!"
 
 ## Enable when existing image needs to be deleted
 ##srun -n 1 -N 1 --gpus=0 docker rmi gcr.io/data-science-enterprise/spark-criteo-rapids-cuda:0.2 || true
 
-srun -n 1 -N 1 --gpus=0 -w `hostname` docker run -i \
+srun --het-group=0 -n 1 -N 1 -w `hostname` docker run -i \
 -e MASTER="${MASTER}" \
 -e CRITEO_HOME="${CRITEO_HOME}" \
 -e SCRIPT="${SCRIPT}" \
@@ -188,7 +199,6 @@ srun -n 1 -N 1 --gpus=0 -w `hostname` docker run -i \
 -v ${MOUNT}/criteo/submit_criteo.sh:/opt/criteo/submit_criteo.sh \
 -v ${MOUNT}/results:/opt/results \
 -v ${CRITEO_DATA}:/opt/criteo/days \
--v ${MOUNT}/criteo/warehouse:/opt/criteo/warehouse \
 -v ${MOUNT}/data/work:/opt/spark/work \
 -v /tmp:/tmp \
 --network host \
@@ -199,6 +209,6 @@ gcr.io/data-science-enterprise/spark-criteo-rapids-cuda:0.2
 sleep infinity
 
 echo "test complete, check ${MOUNT}/results and ${MOUNT}/history" 
-srun -n 1 -N 1 --gpus=0 -w `hostname`  ${MOUNT}/conf/kill-master.sh || true
-srun --ntasks="${SLURM_JOB_NUM_NODES}" ${MOUNT}/conf/kill-worker.sh || true
+srun --het-group=0 -n 1 -N 1 --gpus=0 -w `hostname`  ${MOUNT}/conf/kill-master.sh || true
+srun --het-group=1 --ntasks="${SLURM_JOB_NUM_NODES_HET_GROUP_1}" ${MOUNT}/conf/kill-worker.sh || true
 echo "Cleanup complete, bye bye.."
