@@ -40,7 +40,7 @@ RUN set -ex && \
     mkdir -p /opt/spark/conf && \
     mkdir -p /opt/spark/jars && \
     mkdir -p /opt/tpch && \
-    mkdir -p /opt/spark/work-dir && \
+    mkdir -p /opt/spark/work && \
     mkdir -p /opt/sparkRapidsPlugin && \
     touch /opt/spark/RELEASE && \
     rm /bin/sh && \
@@ -69,7 +69,7 @@ ENV SPARK_RAPIDS_PLUGIN_JAR=$SPARK_RAPIDS_DIR/$RAPIDS_JAR_NAME
 
 ENV SPARK_HOME /opt/spark
 
-WORKDIR /opt/spark/work-dir
-RUN chmod g+w /opt/spark/work-dir
+WORKDIR /opt/spark/work
+RUN chmod g+w /opt/spark/work
 
 ENTRYPOINT $SPARK_HOME/bin/spark-class org.apache.spark.deploy.worker.Worker spark://$MASTER:7077
