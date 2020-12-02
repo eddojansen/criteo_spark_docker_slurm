@@ -49,14 +49,17 @@ if [ $ENABLE_GPU = "false" ]
     --conf spark.executor.resource.gpu.amount=1 \
     --conf spark.executor.extraJavaOptions="-Dai.rapids.cudf.prefer-pinned=true" \
     --conf spark.cores.max=${TOTAL_CORES} \
-    --conf spark.sql.autoBroadcastJoinThreshold=1G \
-    --conf spark.sql.files.maxPartitionBytes=1G \
+    --conf spark.sql.autoBroadcastJoinThreshold=2G \
+    --conf spark.sql.files.maxPartitionBytes=2G \
     --conf spark.task.resource.gpu.amount=${RESOURCE_GPU_AMT} \
     --conf spark.sql.extensions=com.nvidia.spark.rapids.SQLExecPlugin \
     --conf spark.plugins=com.nvidia.spark.SQLPlugin \
     --conf spark.rapids.sql.incompatibleOps.enabled=true \
     --conf spark.rapids.sql.concurrentGpuTasks=${CONCURRENTGPU} \
     --conf spark.rapids.memory.pinnedPool.size=${PINNED_POOL_SIZE} \
+    --conf spark.rapids.memory.gpu.pooling.enabled=true \
+    --conf spark.rapids.shuffle.transport.enabled=true \
+    --conf spark.rapids.memory.gpu.debug=STDOUT \
     --conf spark.executor.heartbeatInterval=300s \
     --conf spark.storage.blockManagerSlaveTimeoutMs=3600s \
     --conf spark.locality.wait=0s \
@@ -86,8 +89,7 @@ fi
         --debug_mode \
         --days ${STARTDAY}-${ENDDAY} \
         --model_folder ${OUTPUT_PATH}/models \
-        --write_mode overwrite && 
-#        --write_mode overwrite --low_mem &&
+        --write_mode overwrite --low_mem &&
 
 /opt/spark/bin/spark-submit ${CMD_PARAM} \
 	${SCRIPT} --mode transform \
@@ -96,8 +98,7 @@ fi
         --days ${STARTDAY}-${TRANSENDDAY} \
         --output_folder ${OUTPUT_PATH}/train \
         --model_folder ${OUTPUT_PATH}/models \
-        --write_mode overwrite &&
-#        --write_mode overwrite --low_mem &&
+        --write_mode overwrite --low_mem &&
 
 /opt/spark/bin/spark-submit ${CMD_PARAM} \
 	${SCRIPT} --mode transform \
@@ -107,5 +108,4 @@ fi
         --output_folder ${OUTPUT_PATH}/${TEST} \
         --output_ordering input \
         --model_folder ${OUTPUT_PATH}/models \
-        --write_mode overwrite 
-#        --write_mode overwrite --low_mem
+        --write_mode overwrite --low_mem

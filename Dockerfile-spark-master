@@ -14,9 +14,9 @@
 # limitations under the License.
 #
 
-FROM nvidia/cuda:11.0-runtime-ubuntu18.04 
+FROM ubuntu:18.04 
 
-RUN apt-get update && apt-get install -y --no-install-recommends openjdk-8-jdk openjdk-8-jre scala python python-pip python3 python3-pip
+RUN apt-get update && apt-get install -y --no-install-recommends openjdk-8-jdk openjdk-8-jre scala python python-pip python3 python3-pip bc
 RUN rm -r /usr/lib/python*/ensurepip && \
     pip install --upgrade pip setuptools && \
     rm -r /root/.cache && rm -rf /var/cache/apt/*
@@ -49,6 +49,9 @@ RUN set -ex && \
     chgrp root /etc/passwd && chmod ug+rw /etc/passwd
 
 RUN mkdir /opt/spark/python
+RUN mkdir /opt/criteo
+RUN chmod g+w /opt/criteo
+RUN mkdir -p /opt/sparkRapidsPlugin
 
 COPY spark/jars /opt/spark/jars
 COPY spark/bin /opt/spark/bin
@@ -61,15 +64,29 @@ COPY sparkRapidsPlugin/cudf-0.16-cuda11.jar /opt/sparkRapidsPlugin
 COPY sparkRapidsPlugin/rapids-4-spark_2.12-0.4.0-20201202.065456-3.jar /opt/sparkRapidsPlugin
 COPY sparkRapidsPlugin/getGpusResources.sh /opt/sparkRapidsPlugin
 
+COPY criteo/xgboost4j-spark_3.0-1.3.0-20201202.095320-95.jar /opt/criteo
+COPY criteo/xgboost4j_3.0-1.3.0-20201202.095259-95.jar /opt/criteo
+COPY criteo/sample_xgboost_apps-0.2.2-20201009.130638-4.jar /opt/criteo
+COPY criteo/spark_data_utils.py /opt/criteo
+
+ENV CRITEO_HOME /opt/criteo
+ENV SPARK_HOME /opt/spark
+
 ENV CUDF_JAR_NAME cudf-0.16-cuda11.jar
 ENV RAPIDS_JAR_NAME rapids-4-spark_2.12-0.4.0-20201202.065456-3.jar
+
+ENV XGBOOST_SPARK_JAR_NAME xgboost4j-spark_3.0-1.3.0-20201202.095320-95.jar
+ENV XGBOOST_JAR_NAME xgboost4j_3.0-1.3.0-20201202.095259-95.jar
+
 ENV SPARK_RAPIDS_DIR /opt/sparkRapidsPlugin
 ENV SPARK_CUDF_JAR $SPARK_RAPIDS_DIR/$CUDF_JAR_NAME
 ENV SPARK_RAPIDS_PLUGIN_JAR=$SPARK_RAPIDS_DIR/$RAPIDS_JAR_NAME
 
-ENV SPARK_HOME /opt/spark
+ENV XGBOOST_JAR ${CRITEO_HOME}/${XGBOOST_JAR_NAME}
+ENV XGBOOST_SPARK_JAR ${CRITEO_HOME}/${XGBOOST_SPARK_JAR_NAME}
+ENV JARS ${XGBOOST_JAR},${XGBOOST_SPARK_JAR},${SPARK_RAPIDS_PLUGIN_JAR},${SPARK_CUDF_JAR}
 
 WORKDIR /opt/spark/work
 RUN chmod g+w /opt/spark/work
 
-ENTRYPOINT $SPARK_HOME/bin/spark-class org.apache.spark.deploy.worker.Worker spark://$MASTER:7077
+ENTRYPOINT $SPARK_HOME/bin/spark-class org.apache.spark.deploy.master.Master
