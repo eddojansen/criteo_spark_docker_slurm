@@ -24,7 +24,7 @@ export MOUNT=/data
 
 ## Criteo test settings
 export STARTDAY=0
-export ENDDAY=23
+export ENDDAY=6
 export FREQUENCY_LIMIT=15
 
 ## Enable or disable GPU with "true" or "false"
@@ -34,7 +34,7 @@ export ENABLE_GPU="true"
 export CONCURRENTGPU=1
 
 ## Set shuffle.partitions, depends on the dataset size: 1T=1048576M / 200 = 5242
-export SHUFFLE_PARTITIONS=5242
+export SHUFFLE_PARTITIONS=1000
 
 ## Set Spark SQL partition size
 export MAXPARTITIONBYTES=128
